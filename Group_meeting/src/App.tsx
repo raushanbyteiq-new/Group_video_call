@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'; // <--- Import useEffect
+import { useState, useEffect } from 'react'; 
 import '@livekit/components-styles';
 import { 
   LiveKitRoom, 
@@ -30,10 +30,14 @@ function ActiveRoom({ onLeave }: { onLeave: () => void }) {
   // 3. Get resetTranslator from hook
   const { translator, initTranslator, status, resetTranslator } = useChromeTranslator();
 
-  // 4. NEW: Automatically reset translator when Target Language changes
+  // 4. FIXED: Only reset when targetLang actually changes
+  // We removed 'resetTranslator' from the dependency array to prevent the "Death Loop"
   useEffect(() => {
-    resetTranslator();
-  }, [targetLang, resetTranslator]);
+    if (status === 'ready') {
+      resetTranslator();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetLang]); 
 
   useSpeechToText(
     room, 
@@ -64,6 +68,7 @@ function ActiveRoom({ onLeave }: { onLeave: () => void }) {
 
       <div className="flex-1 relative overflow-hidden flex flex-col">
         <Stage />
+        {/* Pass the status directly so Captions knows when to translate */}
         <Captions translator={translator} isReady={status === 'ready'} />
       </div>
       
@@ -71,6 +76,7 @@ function ActiveRoom({ onLeave }: { onLeave: () => void }) {
         <ControlBar 
           variation="minimal" 
           controls={{ microphone: true, camera: true, screenShare: true, leave: true }} 
+          // @ts-ignore
           onLeave={onLeave}
         />
       </div>

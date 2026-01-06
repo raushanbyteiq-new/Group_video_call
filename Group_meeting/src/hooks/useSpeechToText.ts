@@ -1,111 +1,136 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Room, LocalParticipant } from 'livekit-client';
+import { Track } from 'livekit-client';
+
+// ⚠️ REPLACE THIS WITH YOUR REAL KEY (The one that worked in the HTML file)
+const DEEPGRAM_API_KEY = "19b2a3f9d9be5a9092dff1810650198119a5d76b"; 
 
 export const useSpeechToText = (
-  room: Room | undefined, 
+  room: Room | undefined,
   localParticipant: LocalParticipant | undefined,
-  shouldListen: boolean, // <--- CHANGED: Controlled by specific button, not mic mute
-  langCode: string
+  shouldListen: boolean, // Controlled by your button
+  langCode: string       // 'en-US' or 'ja-JP'
 ) => {
-  // 1. The Master Switch: Tracks if we WANT to be listening
-  const isSpeechActiveRef = useRef(false);
-  const recognitionRef = useRef<any>(null);
-  
-  // Keep ref to participant to avoid stale closures
-  const participantRef = useRef<LocalParticipant | undefined>(localParticipant);
+  const isListeningRef = useRef(shouldListen);
+
+  // Sync ref with state to prevent stale closures inside callbacks
+  useEffect(() => {
+    isListeningRef.current = shouldListen;
+  }, [shouldListen]);
 
   useEffect(() => {
-    participantRef.current = localParticipant;
-  }, [localParticipant]);
-
-  // 2. The Robust "Recursive Restart" Loop (From your WebRTCWithBuffer.jsx)
-  const startRecognitionLoop = useCallback(() => {
-    // @ts-ignore
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
-
-    // Helper function that creates a new instance and handles its own restart
-    const startInstance = () => {
-      // STOP immediately if the master switch is off
-      if (!isSpeechActiveRef.current) return;
-
-      const recognition = new SpeechRecognition();
-      
-      // CRITICAL: Set continuous to FALSE. 
-      // This stops the engine after every sentence, preventing the "Japanese freeze" bug.
-      recognition.continuous = false; 
-      recognition.interimResults = false;
-      recognition.lang = langCode || 'en-US'; 
-
-      recognition.onresult = (event: any) => {
-        let finalTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          }
-        }
-
-        if (finalTranscript.trim() && participantRef.current) {
-          // Send the ORIGINAL text. The Receiver will translate it.
-          console.log("STT Final Transcript:", finalTranscript);
-          const payload = new TextEncoder().encode(JSON.stringify({
-            text: finalTranscript,
-            srcLang: langCode.split('-')[0] // 'en' or 'ja'
-          }));
-
-          try {
-            participantRef.current.publishData(payload, { reliable: true });
-          } catch (error) {
-            console.warn("Failed to publish STT data:", error);
-          }
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        // Ignore normal errors like 'no-speech' (silence) or 'aborted' (manual stop)
-        if (event.error !== 'no-speech' && event.error !== 'aborted') {
-          console.warn("STT Error (restarting):", event.error);
-        }
-      };
-
-      recognition.onend = () => {
-        // The Magic Loop: If we still want to listen, restart immediately
-        if (isSpeechActiveRef.current) {
-          setTimeout(() => {
-             try { startInstance(); } catch (e) { console.error(e); }
-          }, 50); // Small buffer 
-        }
-      };
-
-      recognitionRef.current = recognition;
-      try { recognition.start(); } catch(e) {}
-    };
-
-    // Kick off the first instance
-    startInstance();
-
-  }, [langCode]);
-
-  // 3. Main Effect to Toggle ON/OFF based on the Button
-  useEffect(() => {
-    if (shouldListen) {
-      // Turn ON
-      isSpeechActiveRef.current = true;
-      startRecognitionLoop();
-    } else {
-      // Turn OFF
-      isSpeechActiveRef.current = false;
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch (e) {}
-      }
+    // 1. Safety Checks
+    if (!shouldListen) return;
+    if (!localParticipant) {
+      console.log("⚠️ STT: Waiting for LocalParticipant...");
+      return;
     }
 
-    // Cleanup on unmount
-    return () => {
-      isSpeechActiveRef.current = false;
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch (e) {}
+    console.log(`🚀 STT: Starting for language: ${langCode}`);
+
+    let socket: WebSocket | null = null;
+    let recorder: MediaRecorder | null = null;
+
+    const startStreaming = async () => {
+      try {
+        // 2. Get the Microphone Track from LiveKit
+        const microphonePub = localParticipant.getTrackPublication(Track.Source.Microphone);
+        const audioTrack = microphonePub?.track?.mediaStreamTrack;
+
+        if (!audioTrack) {
+          console.error("❌ STT: No Microphone Track found. Please unmute or check permissions.");
+          return;
+        }
+
+        // 3. Construct the Deepgram URL (Exactly like your working HTML file)
+        const baseUrl = 'wss://api.deepgram.com/v1/listen';
+        const params = new URLSearchParams({
+          model: 'nova-2',
+          language: langCode.startsWith('ja') ? 'ja' : 'en',
+          smart_format: 'true',
+          interim_results: 'true',
+        });
+
+        const url = `${baseUrl}?${params.toString()}`;
+
+        // 4. Connect using Native WebSocket
+        // We use the ['token', KEY] subprotocol which worked in your test
+        socket = new WebSocket(url, ['token', DEEPGRAM_API_KEY]);
+
+        socket.onopen = () => {
+          console.log("✅ STT: WebSocket Connected!");
+          
+          // Start Recording only AFTER socket is open
+          const stream = new MediaStream([audioTrack]);
+          recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+          recorder.addEventListener('dataavailable', (event) => {
+            if (event.data.size > 0 && socket?.readyState === 1) {
+              socket.send(event.data);
+            }
+          });
+
+          // Send chunks every 250ms (Low latency)
+          recorder.start(250);
+        };
+
+        socket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            const transcript = data.channel?.alternatives?.[0]?.transcript;
+            const isFinal = data.is_final;
+
+            // Only log if there is actual text
+            if (transcript) {
+              // console.log(`🎤 Heard: ${transcript}`); 
+              
+              // Publish to LiveKit only if it's a FINAL result
+              if (isFinal && isListeningRef.current) {
+                console.log(`📤 STT Final: "${transcript}"`);
+                
+                const payload = new TextEncoder().encode(JSON.stringify({
+                  text: transcript,
+                  srcLang: langCode.startsWith('ja') ? 'ja' : 'en'
+                }));
+                
+                localParticipant.publishData(payload, { reliable: true });
+              }
+            }
+          } catch (err) {
+            console.error("Error parsing socket message", err);
+          }
+        };
+
+        socket.onclose = (event) => {
+          if (event.code !== 1000) {
+            console.warn(`🔌 STT: Connection closed unexpectedly (Code: ${event.code})`);
+          } else {
+            console.log("🔌 STT: Connection closed normally");
+          }
+        };
+
+        socket.onerror = (error) => {
+          console.error("❌ STT: Socket Error", error);
+        };
+
+      } catch (error) {
+        console.error("❌ STT Setup Exception:", error);
       }
     };
-  }, [shouldListen, startRecognitionLoop]);
+
+    startStreaming();
+
+    // 5. Cleanup Function
+    // This runs automatically when you toggle the button OFF or leave the page
+    return () => {
+      console.log("🛑 STT: Cleaning up...");
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.stop();
+      }
+      if (socket) {
+        // Force close immediately
+        socket.close();
+      }
+    };
+  }, [shouldListen, langCode, localParticipant]);
 };

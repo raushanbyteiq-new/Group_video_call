@@ -1,35 +1,56 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRoomContext } from '@livekit/components-react';
 import { RoomEvent } from 'livekit-client';
 
 interface Props {
-  translator: any; // The Chrome AI translator object
+  translator: any;
   isReady: boolean;
 }
 
 export const Captions = ({ translator, isReady }: Props) => {
   const room = useRoomContext();
   const [caption, setCaption] = useState<{ text: string, sender: string } | null>(null);
+  
+  // Keep live reference to translator to avoid stale closures
+  const translatorRef = useRef(translator);
+
+  useEffect(() => {
+    translatorRef.current = translator;
+  }, [translator]);
 
   useEffect(() => {
     const handleData = async (payload: Uint8Array, participant: any) => {
       try {
         const data = JSON.parse(new TextDecoder().decode(payload));
         let textToShow = data.text;
+        
+        // --- DEBUG LOGS (Check your Console) ---
+        console.group("🎤 Caption Received");
+        console.log("Original Text:", data.text);
+        console.log("Translator Ready Prop:", isReady);
+        console.log("Translator Object Ref:", !!translatorRef.current);
+        
+        const currentTranslator = translatorRef.current;
 
-        // --- RECEIVER SIDE TRANSLATION ---
-        // If translator is ready, we translate the incoming text
-        if (isReady && translator && typeof translator.translate === 'function') {
+        if (isReady && currentTranslator) {
           try {
-            textToShow = await translator.translate(data.text);
+            console.log("🔄 Attempting translation...");
+            // Try the standard translate method
+            const result = await currentTranslator.translate(data.text);
+            console.log("✅ Translation Result:", result);
+            textToShow = result;
           } catch (err) {
-            console.warn("Translation failed, showing original:", err);
+            console.error("❌ Translation API Error:", err);
+            // Fallback: If 'translate' doesn't exist, log the object keys
+            console.log("Translator keys:", Object.keys(currentTranslator));
           }
+        } else {
+          console.warn("⚠️ Skipping translation: Translator not ready or null.");
         }
+        console.groupEnd();
 
         setCaption({ text: textToShow, sender: participant?.identity || "Unknown" });
         
-        // Hide after 6 seconds
         setTimeout(() => setCaption(null), 6000);
       } catch (e) {
         console.error("Error parsing caption data:", e);
@@ -38,7 +59,7 @@ export const Captions = ({ translator, isReady }: Props) => {
 
     room.on(RoomEvent.DataReceived, handleData);
     return () => { room.off(RoomEvent.DataReceived, handleData); };
-  }, [room, translator, isReady]);
+  }, [room, isReady]);
 
   if (!caption) return null;
 
