@@ -6,7 +6,7 @@ A modern, real-time video conferencing application featuring AI-powered translat
 
 - **Real-Time Video Conferencing**: High-quality video and audio communication using WebRTC
 - **AI-Powered Translation**: Instant translation between English and Japanese using Chrome AI APIs
-- **Speech-to-Text**: Automatic speech recognition with real-time transcription
+- **Speech-to-Text**: Real-time transcription using Deepgram's Nova-3 model
 - **Live Captions**: Translated captions displayed in real-time during conversations
 - **Smart Layouts**: Adaptive video grid layouts for optimal viewing
 - **Room-Based Meetings**: Create or join meeting rooms with custom names
@@ -27,7 +27,8 @@ A modern, real-time video conferencing application featuring AI-powered translat
 - **Vite** - Build tool and development server
 - **Tailwind CSS** - Utility-first CSS framework
 - **LiveKit Components** - Pre-built video conferencing UI components
-- **Chrome AI APIs** - Translation and speech recognition
+- **Deepgram API** - Speech-to-text transcription
+- **Chrome AI APIs** - Translation
 - **Lucide React** - Icon library
 
 ## 📋 Prerequisites
@@ -99,10 +100,22 @@ The application will be available at `http://localhost:5173`.
 ### Chrome AI APIs
 To enable translation features:
 1. Open Chrome and navigate to `chrome://flags/`
+
 2. Enable the following flags:
    - `#enable-experimental-web-platform-features`
    - `#translation-api`
-3. Restart Chrome
+
+
+3. Open Chrome and navigate to `chrome://components/`
+   Check for Update :
+    - `Optimization Hints `
+    - `Chrome TranslateKit`
+    - `Chrome TranslateKit en-ja`
+
+4. Open Chrome and navigate to `chrome://on-device-translation-internals/`
+   - check for `Language Package` Installed or not
+
+5. Restart Chrome
 
 ## 📖 Usage
 
@@ -158,6 +171,7 @@ This project is licensed under the ISC License - see the LICENSE file for detail
 ## 🙏 Acknowledgments
 
 - [LiveKit](https://livekit.io) for WebRTC infrastructure
+- [Deepgram](https://deepgram.com) for speech-to-text transcription
 - [Chrome AI APIs](https://developer.chrome.com/docs/ai/) for translation capabilities
 - [Tailwind CSS](https://tailwindcss.com) for styling
 - [React](https://reactjs.org) for the UI framework
