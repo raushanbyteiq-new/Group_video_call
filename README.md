@@ -102,8 +102,12 @@ To enable translation features:
 1. Open Chrome and navigate to `chrome://flags/`
 
 2. Enable the following flags:
-   - `#enable-experimental-web-platform-features`
+   - `#Enable optimization guide debug logs`
    - `#translation-api`
+   - `#Translation API streaming split by sentence`
+   - `#Enables optimization guide on device`
+   - `#Experimental Web Platform features`
+   - `#Experimental WebAssembly`
 
 
 3. Open Chrome and navigate to `chrome://components/`
